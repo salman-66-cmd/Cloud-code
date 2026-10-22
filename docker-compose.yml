@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: cloudcode-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cloudcode}
+      POSTGRES_USER: ${POSTGRES_USER:-cloudcode_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cloudcode_secure_pass_2026}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cloudcode_user} -d ${POSTGRES_DB:-cloudcode}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: cloudcode-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cloudcode-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-cloudcode_user}:${POSTGRES_PASSWORD:-cloudcode_secure_pass_2026}@db:5432/${POSTGRES_DB:-cloudcode}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-cloudcode-super-secret-key-change-in-production-2026-secure-jwt}
+      STORAGE_DIR: /app/cloudcode_storage
+      USE_DOCKER_SANDBOX: "false"
+    volumes:
+      - cloudcode_storage:/app/cloudcode_storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  execution-worker:
+    build:
+      context: ./execution-worker
+      dockerfile: Dockerfile
+    container_name: cloudcode-worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-cloudcode_user}:${POSTGRES_PASSWORD:-cloudcode_secure_pass_2026}@db:5432/${POSTGRES_DB:-cloudcode}
+      REDIS_URL: redis://redis:6379/0
+      EXECUTION_TIMEOUT_SECONDS: 15
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 512M
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cloudcode-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  cloudcode_storage:
